@@ -248,19 +248,17 @@ Additional goals or instructions from the user:
 {additional_goals}
 """
 
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=temperature,
-            max_tokens=150
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        return f"Error generating summary: {e}"
+    
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=temperature,
+        max_tokens=150
+    )
+    return response.choices[0].message.content.strip()
 
 def plot_embeddings(embeddings, labels, similarities):
     x = embeddings[:,0]
