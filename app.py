@@ -144,16 +144,37 @@ footer {visibility: hidden;}
 ###############################################
 # Helper Functions
 ###############################################
-def Download(link: str) -> str:
+import yt_dlp
+
+def Download(url, output_path=None):
     """
-    Download the YouTube video at the provided URL in the highest available resolution.
-    Returns the file path of the downloaded video.
+    Download a YouTube video using yt-dlp
+    
+    Args:
+        url (str): YouTube video URL
+        output_path (str, optional): Path where video should be saved
+                                   If None, saves in current directory
+    
+    Returns:
+        str: Path to downloaded file
     """
-    temp_dir = tempfile.gettempdir()
-    youtube = YouTube(link, use_po_token=False)
-    highest_res_stream = youtube.streams.get_highest_resolution()
-    filename = highest_res_stream.download(output_path=temp_dir)
-    return filename
+    ydl_opts = {
+        'format': 'best',  # Download best quality
+        'outtmpl': '%(title)s.%(ext)s' if not output_path else output_path,
+        # Add postprocessors if needed, e.g. for extracting audio:
+        # 'postprocessors': [{
+        #     'key': 'FFmpegExtractAudio',
+        #     'preferredcodec': 'mp3',
+        # }],
+    }
+    
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            return ydl.prepare_filename(info)
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+        return None
 
 def get_video_duration(video_path: str) -> float:
     cap = cv2.VideoCapture(video_path)
