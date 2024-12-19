@@ -7,5 +7,5 @@ pandas
 matplotlib
 scikit-learn
 Pillow
-opencv-python-headless
+opencv-python
 yt-dlp
