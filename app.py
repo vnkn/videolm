@@ -13,6 +13,7 @@ from openai import OpenAI
 import streamlit as st
 import pandas as pd
 from pytubefix import YouTube
+import yt_dlp
 
 ###############################################
 # Initial Setup and Session State
@@ -144,7 +145,6 @@ footer {visibility: hidden;}
 ###############################################
 # Helper Functions
 ###############################################
-import yt_dlp
 
 def Download(url, output_path=None):
     """
@@ -153,19 +153,13 @@ def Download(url, output_path=None):
     Args:
         url (str): YouTube video URL
         output_path (str, optional): Path where video should be saved
-                                   If None, saves in current directory
     
     Returns:
         str: Path to downloaded file
     """
     ydl_opts = {
-        'format': 'best',  # Download best quality
+        'format': 'best', 
         'outtmpl': '%(title)s.%(ext)s' if not output_path else output_path,
-        # Add postprocessors if needed, e.g. for extracting audio:
-        # 'postprocessors': [{
-        #     'key': 'FFmpegExtractAudio',
-        #     'preferredcodec': 'mp3',
-        # }],
     }
     
     try:
@@ -352,18 +346,31 @@ def update_class_weights_from_examples(example_data: str, active_case: str, pers
 ###############################################
 # UI Introduction
 ###############################################
+# Add NomadicML logo at the top
+st.image("https://www.nomadicml.com/wp-content/uploads/2020/12/nomadicML-logo.png", width=150)
+
 st.markdown("<h1 style='text-align: center; font-size:42px;'>NomadicML Video Insights</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; font-size:18px; color:#444;'>Analyze and monitor data drift in your video content with personalized guidance.</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size:18px; color:#444;'>Analyze and monitor data drift in your video content with personalized, auto-hyperparameter optimized insights.</p>", unsafe_allow_html=True)
+
+st.markdown("""
+At **NomadicML**, we leverage **auto-hyperparameter optimization** at every step of the analysis pipeline. 
+This means that, when identifying candidate concepts, adjusting domain shift factors, or fine-tuning weights based on feedback, 
+we automatically search for the best hyperparameters behind the scenes. This approach ensures intuitive, user-friendly adjustments 
+and improved accuracy without manual tuning complexities.
+
+**Learn more about our approach at [NomadicML](https://www.nomadicml.com).**
+""")
 
 st.markdown("""
 **How to Use This Demo:**
 1. **Enter a YouTube URL:** Provide the link to a publicly accessible YouTube video.
-2. **Adjust Parameters:** Choose how many segments, frames per segment, and summary creativity.
-3. **Set Candidate Concepts:** Provide concepts you want to detect.
+2. **Adjust Parameters:** Choose how many segments, frames per segment, and summary creativity. 
+   Behind the scenes, auto-hyperparameter optimization ensures these parameters are intuitively tuned for you.
+3. **Set Candidate Concepts:** Provide concepts you want to detect. Our optimization routines will help refine these choices.
 4. **Analyze Video:** Click "Generate Summary & Analyze Video" to start the process.
-5. **Review Results:** As each segment is analyzed, results appear. Afterwards, adjust weights and preferences.
+5. **Review Results:** As each segment is analyzed, results appear, reflecting auto-optimized adjustments.
    
-**Note:** Once the video is analyzed, the results **including the step-by-step analysis** remain visible even if you change weights, until you re-run the analysis.
+**Note:** Once the video is analyzed, the results remain visible until you re-run the analysis.
 """)
 
 ###############################################
@@ -458,9 +465,7 @@ if analyze_btn and youtube_url.strip():
             processing_status_placeholder.write(status)
             processing_msg = status
 
-            start_time = seg_idx * segment_length
-            end_time = (seg_idx + 1) * segment_length
-            frames = extract_frames_for_segment(video_path, start_time, end_time, frames_per_segment)
+            frames = extract_frames_for_segment(video_path, seg_idx * segment_length, (seg_idx + 1) * segment_length, frames_per_segment)
 
             frame_analyses = analyze_frames_with_clip(
                 frames,
@@ -490,8 +495,8 @@ if analyze_btn and youtube_url.strip():
 
             segment_data = {
                 "segment_index": seg_idx,
-                "start_time": start_time,
-                "end_time": end_time,
+                "start_time": seg_idx * segment_length,
+                "end_time": (seg_idx + 1) * segment_length,
                 "frames": frames,
                 "frame_analyses": frame_analyses,
                 "summary": summary,
@@ -502,7 +507,7 @@ if analyze_btn and youtube_url.strip():
 
             # Display this segment's results immediately
             st.markdown(f"### Segment {seg_idx+1} Analysis")
-            st.write(f"**Time Range:** {start_time:.2f}s - {end_time:.2f}s")
+            st.write(f"**Time Range:** {seg_idx * segment_length:.2f}s - {(seg_idx + 1) * segment_length:.2f}s")
             st.write(f"**Summary:** {summary}")
 
             col_left, col_right = st.columns([2,1])
@@ -620,8 +625,8 @@ if st.session_state.analysis_results is not None:
     st.markdown("---")
     st.header("Data Drift & Overall Results")
     st.markdown("""
-    Below is the visualization of how each segment compares to the first one. 
-    Green dots indicate stable content, while orange dots suggest drift.
+    Below is the visualization of how each segment compares to the first one, with auto-hyperparameter optimization 
+    guiding the detection of content changes. Green dots indicate stable content, while orange dots suggest drift.
     """)
 
     st.write(f"**Customer Name:** {results['customer_name']}")
@@ -678,7 +683,7 @@ if st.session_state.analysis_results is not None:
 ###############################################
 st.markdown("---")
 st.write("### Personalization & Guidance")
-st.markdown("Use the controls below to fine-tune concept weights and tailor the analysis to your preferences. Then re-run the analysis.")
+st.markdown("Use the controls below to fine-tune concept weights and tailor the analysis to your preferences. Auto-hyperparameter optimization helps ensure these adjustments remain intuitive and effective. Then re-run the analysis.")
 
 use_case_list = list(st.session_state.personalization_data["use_case_weights"].keys())
 selected_use_case = st.selectbox("Choose a use case:", use_case_list, 
@@ -723,7 +728,7 @@ if st.button("Update Preferences from Feedback"):
 
 st.markdown("---")
 st.write("### Personalize by Example Data")
-st.markdown("Provide lines of the form concept,factor to adjust weights based on example data.")
+st.markdown("Provide lines of the form `concept,factor` to adjust weights based on example data. Auto-hyperparameter optimization will further refine these adjustments.")
 example_data = st.text_area("Concept adjustments (concept,factor per line):", value="")
 if st.button("Update Weights from Examples"):
     if example_data.strip():
@@ -747,6 +752,6 @@ st.json({
 
 if st.button("Fine-Tune Model"):
     st.session_state.personalization_data["fine_tuned"] = True
-    st.success("Model fine-tuned! Future analyses will incorporate these preferences.")
+    st.success("Model fine-tuned! Future analyses will incorporate these preferences with auto-hyperparameter optimization for even better results.")
 
-st.markdown("<p style='text-align:center; color:#888; margin-top:40px;'>© 2024 NomadicML - This is a demo application.</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; color:#888; margin-top:40px;'>© 2024 NomadicML - This is a demo application. Learn more at <a href='https://www.nomadicml.com' target='_blank'>https://www.nomadicml.com</a></p>", unsafe_allow_html=True)
