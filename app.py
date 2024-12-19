@@ -12,7 +12,6 @@ from transformers import CLIPProcessor, CLIPModel
 from openai import OpenAI
 import streamlit as st
 import pandas as pd
-from pytubefix import YouTube
 import yt_dlp
 
 ###############################################
