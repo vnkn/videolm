@@ -453,7 +453,7 @@ if analyze_btn and youtube_url.strip():
                 summary_status_placeholder.write("**Generating Segment Summary...**")
                 summary_msg = "**Generating Segment Summary...**"
 
-                summary = generate_summary(frame_analyses, temperature=temperature, model="gpt-4", 
+                summary = generate_summary(frame_analyses, temperature=temperature, model="gpt-4o", 
                                            additional_goals=st.session_state.personalization_data["goals"])
                 summary_progress.progress(int(((seg_idx+1)/num_segments)*100))
 
