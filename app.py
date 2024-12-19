@@ -147,14 +147,12 @@ footer {visibility: hidden;}
 ###############################################
 def download_video_yt_dlp(url: str) -> str:
     temp_dir = tempfile.gettempdir()
+    # Format 18 typically provides an MP4 with both audio & video included (360p)
     ydl_opts = {
-        # This attempts to pick a best MP4 video that doesn't use av01 (AV1 codec),
-        # plus the best M4A audio, falling back to best MP4 if needed.
-        'format': 'bestvideo[ext=mp4][vcodec!=av01]+bestaudio[ext=m4a]/best[ext=mp4]',
+        'format': '18',
         'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
         'quiet': True
     }
-
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
