@@ -668,7 +668,7 @@ for c in sorted(st.session_state.personalization_data["class_weights"].keys()):
     st.session_state.personalization_data["class_weights"][c] = new_weight
 
 st.subheader("Your Summary Goals")
-st.session_state.personalization_data["goals"] = st.text_area("Emphasize in summaries:", value=st.session_state.personalization_data["goals"], height=60)
+st.session_state.personalization_data["goals"] = st.text_area("Emphasize in summaries:", value=st.session_state.personalization_data["goals"], height=100)
 
 st.subheader("Your Preferred Concepts")
 preferred_concepts_str = st.text_input("Concepts (comma-separated):", 
