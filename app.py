@@ -148,12 +148,13 @@ footer {visibility: hidden;}
 def download_video_yt_dlp(url: str) -> str:
     temp_dir = tempfile.gettempdir()
     ydl_opts = {
-    # This tries best video with MP4 container and h.264 codec, plus best audio in M4A.
-    # If that fails, it falls back to a best MP4 choice.
-    'format': 'bv*[ext=mp4][vcodec~=^avc1]+ba[ext=m4a]/bv*[ext=mp4]+ba[ext=m4a]/best[ext=mp4]',
-    'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-    'quiet': True
+        # This attempts to pick a best MP4 video that doesn't use av01 (AV1 codec),
+        # plus the best M4A audio, falling back to best MP4 if needed.
+        'format': 'bestvideo[ext=mp4][vcodec!=av01]+bestaudio[ext=m4a]/best[ext=mp4]',
+        'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+        'quiet': True
     }
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
