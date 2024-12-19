@@ -147,13 +147,7 @@ footer {visibility: hidden;}
 ###############################################
 def download_video_yt_dlp(url: str) -> str:
     temp_dir = tempfile.gettempdir()
-    # Format 18 typically provides an MP4 with both audio & video included (360p)
-    ydl_opts = {
-        'format': '18',
-        'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-        'quiet': True
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    with yt_dlp.YoutubeDL() as ydl:
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
     return filename
