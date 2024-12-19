@@ -398,181 +398,177 @@ results_container = st.container()
 # Analysis and Step-by-Step Display
 ###############################################
 if analyze_btn and youtube_url.strip():
-    try:
-        model_version = st.session_state.personalization_data["model_version"]
-        combined_class_weights = dict(st.session_state.personalization_data["class_weights"])
+    model_version = st.session_state.personalization_data["model_version"]
+    combined_class_weights = dict(st.session_state.personalization_data["class_weights"])
 
-        with results_container:
-            st.markdown("<hr>", unsafe_allow_html=True)
-            st.subheader("Step-by-Step Analysis")
-            step_col1, step_col2, step_col3 = st.columns([1,1,1])
+    with results_container:
+        st.markdown("<hr>", unsafe_allow_html=True)
+        st.subheader("Step-by-Step Analysis")
+        step_col1, step_col2, step_col3 = st.columns([1,1,1])
 
-            # We'll store strings here so we can save them easily
-            download_msg = ""
-            processing_msg = ""
-            summary_msg = ""
+        # We'll store strings here so we can save them easily
+        download_msg = ""
+        processing_msg = ""
+        summary_msg = ""
 
-            with step_col1:
-                st.markdown("### 1. Downloading Video")
-                download_status_placeholder = st.empty()
-                download_progress = st.progress(0)
+        with step_col1:
+            st.markdown("### 1. Downloading Video")
+            download_status_placeholder = st.empty()
+            download_progress = st.progress(0)
 
-            with step_col2:
-                st.markdown("### 2. Processing & Analysis")
-                processing_status_placeholder = st.empty()
-                processing_progress = st.progress(0)
+        with step_col2:
+            st.markdown("### 2. Processing & Analysis")
+            processing_status_placeholder = st.empty()
+            processing_progress = st.progress(0)
 
-            with step_col3:
-                st.markdown("### 3. Summaries & Insights")
-                summary_status_placeholder = st.empty()
-                summary_progress = st.progress(0)
+        with step_col3:
+            st.markdown("### 3. Summaries & Insights")
+            summary_status_placeholder = st.empty()
+            summary_progress = st.progress(0)
 
-            # Download video
-            download_status_placeholder.write("**Status:** Downloading video...")
-            download_msg = "**Status:** Downloading video..."
+        # Download video
+        download_status_placeholder.write("**Status:** Downloading video...")
+        download_msg = "**Status:** Downloading video..."
 
-            video_path = Download(youtube_url)
-            download_progress.progress(50)
+        video_path = Download(youtube_url)
+        download_progress.progress(50)
 
-            if not video_path or not os.path.exists(video_path):
-                download_status_placeholder.write("**Error:** Failed to download video.")
-                download_msg = "**Error:** Failed to download video."
-                st.error("Failed to download the video. Check the URL or permissions.")
-                st.stop()
+        if not video_path or not os.path.exists(video_path):
+            download_status_placeholder.write("**Error:** Failed to download video.")
+            download_msg = "**Error:** Failed to download video."
+            st.error("Failed to download the video. Check the URL or permissions.")
+            st.stop()
 
-            download_progress.progress(100)
-            download_status_placeholder.write("**Status:** Video downloaded successfully!")
-            download_msg = "**Status:** Video downloaded successfully!"
+        download_progress.progress(100)
+        download_status_placeholder.write("**Status:** Video downloaded successfully!")
+        download_msg = "**Status:** Video downloaded successfully!"
 
-            duration = get_video_duration(video_path)
-            if duration <= 0:
-                st.error("Could not determine video duration or video is empty.")
-                st.stop()
+        duration = get_video_duration(video_path)
+        if duration <= 0:
+            st.error("Could not determine video duration or video is empty.")
+            st.stop()
 
-            segment_length = duration / num_segments
-            segment_info = []
+        segment_length = duration / num_segments
+        segment_info = []
 
-            # Process each segment and display results incrementally
-            for seg_idx in range(num_segments):
-                processing_progress.progress(int((seg_idx / num_segments)*100))
-                status = f"**Analyzing Segment {seg_idx+1}/{num_segments}...**"
-                processing_status_placeholder.write(status)
-                processing_msg = status
+        # Process each segment and display results incrementally
+        for seg_idx in range(num_segments):
+            processing_progress.progress(int((seg_idx / num_segments)*100))
+            status = f"**Analyzing Segment {seg_idx+1}/{num_segments}...**"
+            processing_status_placeholder.write(status)
+            processing_msg = status
 
-                start_time = seg_idx * segment_length
-                end_time = (seg_idx + 1) * segment_length
-                frames = extract_frames_for_segment(video_path, start_time, end_time, frames_per_segment)
+            start_time = seg_idx * segment_length
+            end_time = (seg_idx + 1) * segment_length
+            frames = extract_frames_for_segment(video_path, start_time, end_time, frames_per_segment)
 
-                frame_analyses = analyze_frames_with_clip(
-                    frames,
-                    model_version=model_version,
-                    candidate_descriptions=candidate_descriptions,
-                    class_weights=combined_class_weights,
-                    domain_shift_factor=domain_factor
-                )
+            frame_analyses = analyze_frames_with_clip(
+                frames,
+                model_version=model_version,
+                candidate_descriptions=candidate_descriptions,
+                class_weights=combined_class_weights,
+                domain_shift_factor=domain_factor
+            )
 
-                summary_status_placeholder.write("**Generating Segment Summary...**")
-                summary_msg = "**Generating Segment Summary...**"
+            summary_status_placeholder.write("**Generating Segment Summary...**")
+            summary_msg = "**Generating Segment Summary...**"
 
-                summary = generate_summary(frame_analyses, temperature=temperature, model="gpt-4o", 
-                                           additional_goals=st.session_state.personalization_data["goals"])
-                summary_progress.progress(int(((seg_idx+1)/num_segments)*100))
+            summary = generate_summary(frame_analyses, temperature=temperature, model="gpt-4o", 
+                                       additional_goals=st.session_state.personalization_data["goals"])
+            summary_progress.progress(int(((seg_idx+1)/num_segments)*100))
 
-                if frames:
-                    embeddings = compute_clip_embeddings(frames, model_version=model_version)
-                    segment_embedding = embeddings.mean(dim=0).cpu().numpy()
-                else:
-                    segment_embedding = np.zeros(512)
-
-                top_concepts = set()
-                for frame_res in frame_analyses:
-                    for desc, conf in frame_res:
-                        top_concepts.add(desc)
-
-                segment_data = {
-                    "segment_index": seg_idx,
-                    "start_time": start_time,
-                    "end_time": end_time,
-                    "frames": frames,
-                    "frame_analyses": frame_analyses,
-                    "summary": summary,
-                    "embedding": segment_embedding,
-                    "top_concepts": list(top_concepts)
-                }
-                segment_info.append(segment_data)
-
-                # Display this segment's results immediately
-                st.markdown(f"### Segment {seg_idx+1} Analysis")
-                st.write(f"**Time Range:** {start_time:.2f}s - {end_time:.2f}s")
-                st.write(f"**Summary:** {summary}")
-
-                col_left, col_right = st.columns([2,1])
-                with col_left:
-                    st.write("**Top Concepts per Frame:**")
-                    for i, frame_res in enumerate(frame_analyses):
-                        top_str = ", ".join([f"{desc} ({conf*100:.1f}%)" for desc, conf in frame_res])
-                        st.write(f"Frame {i+1}: {top_str}")
-                with col_right:
-                    st.write("**Frames:**")
-                    for i, f_ in enumerate(frames):
-                        st.image(f_, caption=f"Frame {i+1}")
-
-                st.write("---")
-
-            processing_progress.progress(100)
-            processing_status_placeholder.write("**All segments processed!**")
-            processing_msg = "**All segments processed!**"
-
-            summary_status_placeholder.write("**All summaries generated!**")
-            summary_msg = "**All summaries generated!**"
-
-            # Compute PCA and similarities for data drift
-            all_embeddings = np.vstack([seg["embedding"] for seg in segment_info])
-            if all_embeddings.shape[0] > 1:
-                pca = PCA(n_components=2)
-                reduced = pca.fit_transform(all_embeddings)
+            if frames:
+                embeddings = compute_clip_embeddings(frames, model_version=model_version)
+                segment_embedding = embeddings.mean(dim=0).cpu().numpy()
             else:
-                reduced = np.zeros((1, 2))
+                segment_embedding = np.zeros(512)
 
-            similarities = []
-            if len(segment_info) > 0:
-                first_norm = segment_info[0]["embedding"] / np.linalg.norm(segment_info[0]["embedding"])
-                for seg in segment_info:
-                    current_norm = seg["embedding"] / np.linalg.norm(seg["embedding"])
-                    similarity = np.dot(first_norm, current_norm)
-                    similarities.append(similarity)
-            else:
-                similarities = [1.0]
+            top_concepts = set()
+            for frame_res in frame_analyses:
+                for desc, conf in frame_res:
+                    top_concepts.add(desc)
 
-            labels = [f"Part {seg['segment_index']+1}" for seg in segment_info]
-            emb_plot = plot_embeddings(reduced, labels, similarities)
-
-            # Save analysis results to session state so they remain on reruns
-            st.session_state.analysis_results = {
-                "video_url": youtube_url,
-                "duration": duration,
-                "segment_length": segment_length,
-                "segment_info": segment_info,
-                "reduced_embeddings": reduced,
-                "similarities": similarities,
-                "labels": labels,
-                "emb_plot": emb_plot,
-                "combined_class_weights": combined_class_weights,
-                "video_path": video_path,
-                "model_version": model_version,
-                "customer_name": st.session_state.personalization_data["customer_name"]
+            segment_data = {
+                "segment_index": seg_idx,
+                "start_time": start_time,
+                "end_time": end_time,
+                "frames": frames,
+                "frame_analyses": frame_analyses,
+                "summary": summary,
+                "embedding": segment_embedding,
+                "top_concepts": list(top_concepts)
             }
+            segment_info.append(segment_data)
 
-            # Store step analysis messages as plain text (no UI objects)
-            st.session_state.analysis_steps = {
-                "download_msg": download_msg,
-                "processing_msg": processing_msg,
-                "summary_msg": summary_msg
-            }
+            # Display this segment's results immediately
+            st.markdown(f"### Segment {seg_idx+1} Analysis")
+            st.write(f"**Time Range:** {start_time:.2f}s - {end_time:.2f}s")
+            st.write(f"**Summary:** {summary}")
 
-    except Exception as e:
-        st.error(f"Error during processing: {e}")
-        st.info("Try another video URL, or ensure it's publicly accessible.")
+            col_left, col_right = st.columns([2,1])
+            with col_left:
+                st.write("**Top Concepts per Frame:**")
+                for i, frame_res in enumerate(frame_analyses):
+                    top_str = ", ".join([f"{desc} ({conf*100:.1f}%)" for desc, conf in frame_res])
+                    st.write(f"Frame {i+1}: {top_str}")
+            with col_right:
+                st.write("**Frames:**")
+                for i, f_ in enumerate(frames):
+                    st.image(f_, caption=f"Frame {i+1}")
+
+            st.write("---")
+
+        processing_progress.progress(100)
+        processing_status_placeholder.write("**All segments processed!**")
+        processing_msg = "**All segments processed!**"
+
+        summary_status_placeholder.write("**All summaries generated!**")
+        summary_msg = "**All summaries generated!**"
+
+        # Compute PCA and similarities for data drift
+        all_embeddings = np.vstack([seg["embedding"] for seg in segment_info])
+        if all_embeddings.shape[0] > 1:
+            pca = PCA(n_components=2)
+            reduced = pca.fit_transform(all_embeddings)
+        else:
+            reduced = np.zeros((1, 2))
+
+        similarities = []
+        if len(segment_info) > 0:
+            first_norm = segment_info[0]["embedding"] / np.linalg.norm(segment_info[0]["embedding"])
+            for seg in segment_info:
+                current_norm = seg["embedding"] / np.linalg.norm(seg["embedding"])
+                similarity = np.dot(first_norm, current_norm)
+                similarities.append(similarity)
+        else:
+            similarities = [1.0]
+
+        labels = [f"Part {seg['segment_index']+1}" for seg in segment_info]
+        emb_plot = plot_embeddings(reduced, labels, similarities)
+
+        # Save analysis results to session state so they remain on reruns
+        st.session_state.analysis_results = {
+            "video_url": youtube_url,
+            "duration": duration,
+            "segment_length": segment_length,
+            "segment_info": segment_info,
+            "reduced_embeddings": reduced,
+            "similarities": similarities,
+            "labels": labels,
+            "emb_plot": emb_plot,
+            "combined_class_weights": combined_class_weights,
+            "video_path": video_path,
+            "model_version": model_version,
+            "customer_name": st.session_state.personalization_data["customer_name"]
+        }
+
+        # Store step analysis messages as plain text (no UI objects)
+        st.session_state.analysis_steps = {
+            "download_msg": download_msg,
+            "processing_msg": processing_msg,
+            "summary_msg": summary_msg
+        }
+
 
 ###############################################
 # Display previously generated step-by-step analysis if available
