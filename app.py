@@ -150,7 +150,7 @@ def Download(link: str) -> str:
     Returns the file path of the downloaded video.
     """
     temp_dir = tempfile.gettempdir()
-    youtube = YouTube(link)
+    youtube = YouTube(link, use_po_token=True)
     highest_res_stream = youtube.streams.get_highest_resolution()
     filename = highest_res_stream.download(output_path=temp_dir)
     return filename
