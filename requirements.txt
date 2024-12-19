@@ -10,3 +10,4 @@ Pillow
 opencv-python
 yt-dlp
 pytubefix
+pytube
