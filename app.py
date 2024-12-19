@@ -12,7 +12,7 @@ from transformers import CLIPProcessor, CLIPModel
 from openai import OpenAI
 import streamlit as st
 import pandas as pd
-import yt_dlp
+from pytube import YouTube
 
 ###############################################
 # Initial Setup and Session State
@@ -58,7 +58,6 @@ if "personalization_data" not in st.session_state:
         "model_version": "openai/clip-vit-base-patch32"
     }
 
-# Store final step-by-step analysis states
 if "analysis_steps" not in st.session_state:
     st.session_state.analysis_steps = None
 
@@ -145,11 +144,15 @@ footer {visibility: hidden;}
 ###############################################
 # Helper Functions
 ###############################################
-def download_video_yt_dlp(url: str) -> str:
+def Download(link: str) -> str:
+    """
+    Download the YouTube video at the provided URL in the highest available resolution.
+    Returns the file path of the downloaded video.
+    """
     temp_dir = tempfile.gettempdir()
-    with yt_dlp.YoutubeDL() as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
+    youtube = YouTube(link)
+    highest_res_stream = youtube.streams.get_highest_resolution()
+    filename = highest_res_stream.download(output_path=temp_dir)
     return filename
 
 def get_video_duration(video_path: str) -> float:
@@ -384,6 +387,12 @@ if analyze_btn and youtube_url.strip():
             st.markdown("<hr>", unsafe_allow_html=True)
             st.subheader("Step-by-Step Analysis")
             step_col1, step_col2, step_col3 = st.columns([1,1,1])
+
+            # We'll store strings here so we can save them easily
+            download_msg = ""
+            processing_msg = ""
+            summary_msg = ""
+
             with step_col1:
                 st.markdown("### 1. Downloading Video")
                 download_status_placeholder = st.empty()
@@ -401,16 +410,20 @@ if analyze_btn and youtube_url.strip():
 
             # Download video
             download_status_placeholder.write("**Status:** Downloading video...")
-            video_path = download_video_yt_dlp(youtube_url)
+            download_msg = "**Status:** Downloading video..."
+
+            video_path = Download(youtube_url)
             download_progress.progress(50)
 
             if not video_path or not os.path.exists(video_path):
                 download_status_placeholder.write("**Error:** Failed to download video.")
+                download_msg = "**Error:** Failed to download video."
                 st.error("Failed to download the video. Check the URL or permissions.")
                 st.stop()
 
             download_progress.progress(100)
             download_status_placeholder.write("**Status:** Video downloaded successfully!")
+            download_msg = "**Status:** Video downloaded successfully!"
 
             duration = get_video_duration(video_path)
             if duration <= 0:
@@ -423,7 +436,9 @@ if analyze_btn and youtube_url.strip():
             # Process each segment and display results incrementally
             for seg_idx in range(num_segments):
                 processing_progress.progress(int((seg_idx / num_segments)*100))
-                processing_status_placeholder.write(f"**Analyzing Segment {seg_idx+1}/{num_segments}...**")
+                status = f"**Analyzing Segment {seg_idx+1}/{num_segments}...**"
+                processing_status_placeholder.write(status)
+                processing_msg = status
 
                 start_time = seg_idx * segment_length
                 end_time = (seg_idx + 1) * segment_length
@@ -438,6 +453,8 @@ if analyze_btn and youtube_url.strip():
                 )
 
                 summary_status_placeholder.write("**Generating Segment Summary...**")
+                summary_msg = "**Generating Segment Summary...**"
+
                 summary = generate_summary(frame_analyses, temperature=temperature, model="gpt-4", 
                                            additional_goals=st.session_state.personalization_data["goals"])
                 summary_progress.progress(int(((seg_idx+1)/num_segments)*100))
@@ -485,7 +502,10 @@ if analyze_btn and youtube_url.strip():
 
             processing_progress.progress(100)
             processing_status_placeholder.write("**All segments processed!**")
+            processing_msg = "**All segments processed!**"
+
             summary_status_placeholder.write("**All summaries generated!**")
+            summary_msg = "**All summaries generated!**"
 
             # Compute PCA and similarities for data drift
             all_embeddings = np.vstack([seg["embedding"] for seg in segment_info])
@@ -524,12 +544,11 @@ if analyze_btn and youtube_url.strip():
                 "customer_name": st.session_state.personalization_data["customer_name"]
             }
 
-            # Save final snapshot of step-by-step analysis states
-            # We'll store what was shown above so on rerun we can still show it
+            # Store step analysis messages as plain text (no UI objects)
             st.session_state.analysis_steps = {
-                "download_msg": download_status_placeholder._value,
-                "processing_msg": processing_status_placeholder._value,
-                "summary_msg": summary_status_placeholder._value
+                "download_msg": download_msg,
+                "processing_msg": processing_msg,
+                "summary_msg": summary_msg
             }
 
     except Exception as e:
@@ -689,7 +708,7 @@ if st.button("Update Preferences from Feedback"):
 
 st.markdown("---")
 st.write("### Personalize by Example Data")
-st.markdown("Provide lines of the form `concept, factor` to adjust weights based on example data.")
+st.markdown("Provide lines of the form `concept,factor` to adjust weights based on example data.")
 example_data = st.text_area("Concept adjustments (concept,factor per line):", value="")
 if st.button("Update Weights from Examples"):
     if example_data.strip():
