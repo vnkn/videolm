@@ -15,6 +15,9 @@ import pandas as pd
 from pytubefix import YouTube
 import yt_dlp
 
+# Additional imports for captioning
+from transformers import BlipProcessor, BlipForConditionalGeneration
+
 ###############################################
 # Initial Setup and Session State
 ###############################################
@@ -241,29 +244,57 @@ def analyze_frames_with_clip(frames, model_version, candidate_descriptions, clas
 
     return all_frame_results
 
-def generate_summary(frame_analyses, temperature, model, additional_goals):
+# New function to generate captions using BLIP
+@st.cache_resource
+def load_captioning_model():
+    blip_model_name = "Salesforce/blip-image-captioning-base"
+    processor = BlipProcessor.from_pretrained(blip_model_name)
+    model = BlipForConditionalGeneration.from_pretrained(blip_model_name)
+    model.eval()
+    return processor, model
+
+def generate_captions_for_frames(frames: List[Image.Image]) -> List[str]:
+    if not frames:
+        return []
+
+    processor, model = load_captioning_model()
+    captions = []
+    for frame in frames:
+        inputs = processor(frame, return_tensors="pt")
+        with torch.no_grad():
+            output_ids = model.generate(**inputs, max_length=50, num_beams=5)
+        caption = processor.decode(output_ids[0], skip_special_tokens=True)
+        captions.append(caption)
+    return captions
+
+def generate_summary(frame_captions, frame_concepts, temperature, model, additional_goals):
     try:
         client = OpenAI()
     except Exception as e:
         return f"Error initializing OpenAI client: {e}"
 
+    # Incorporate both captions and concepts, but emphasize the captions for faithfulness
     frame_descriptions = []
-    for i, frame_results in enumerate(frame_analyses):
-        top_matches = [f"{desc} ({conf*100:.1f}%)" for desc, conf in frame_results]
-        frame_descriptions.append(f"Frame {i+1}: {', '.join(top_matches)}")
+    for i, caption in enumerate(frame_captions):
+        # Also include the top concepts (if any) to guide emphasis, but keep them secondary
+        if i < len(frame_concepts):
+            top_concepts_str = ", ".join([f"{desc} ({conf*100:.1f}%)" for desc, conf in frame_concepts[i]])
+            frame_descriptions.append(f"Frame {i+1}: Caption: '{caption}' | Concepts: {top_concepts_str}")
+        else:
+            frame_descriptions.append(f"Frame {i+1}: Caption: '{caption}'")
 
-    system_message = "You are a friendly video summarizer."
-    user_prompt = f"""We analyzed each part of the video and found these concepts:
+    system_message = "You are a friendly video summarizer who focuses on what is actually visible in the video."
+    user_prompt = f"""We analyzed each part of the video and generated captions for each frame:
 
 {chr(10).join(frame_descriptions)}
 
-Please write a short, friendly summary of this segment, mentioning the main visible elements.
+From these captions, please write a short, friendly summary of this segment, focusing primarily on what's actually visible in the video. 
+Use the concepts only as subtle emphasis. If the user has additional goals or aspects to emphasize, incorporate that softly.
 
 Additional goals or instructions from the user:
 {additional_goals}
 """
 
-    
     response = client.chat.completions.create(
         model=model,
         messages=[
@@ -346,7 +377,6 @@ def update_class_weights_from_examples(example_data: str, active_case: str, pers
 ###############################################
 # UI Introduction
 ###############################################
-# Add NomadicML logo at the top
 st.image("https://www.nomadicml.com/wp-content/uploads/2020/12/nomadicML-logo.png", width=150)
 
 st.markdown("<h1 style='text-align: center; font-size:42px;'>NomadicML Video Insights</h1>", unsafe_allow_html=True)
@@ -365,10 +395,10 @@ st.markdown("""
 **How to Use This Demo:**
 1. **Enter a YouTube URL:** Provide the link to a publicly accessible YouTube video.
 2. **Adjust Parameters:** Choose how many segments, frames per segment, and summary creativity. 
-   Behind the scenes, auto-hyperparameter optimization ensures these parameters are intuitively tuned for you.
-3. **Set Candidate Concepts:** Provide concepts you want to detect. Our optimization routines will help refine these choices.
-4. **Analyze Video:** Click "Generate Summary & Analyze Video" to start the process.
-5. **Review Results:** As each segment is analyzed, results appear, reflecting auto-optimized adjustments.
+   Our auto-optimization helps tune these parameters intuitively.
+3. **Set Candidate Concepts:** Provide concepts you want to highlight or emphasize.
+4. **Analyze Video:** Click "Generate Summary & Analyze Video" to start.
+5. **Review Results:** The summary now comes primarily from automatically generated captions (making it more faithful to what’s actually in the video), with concepts woven in subtly.
    
 **Note:** Once the video is analyzed, the results remain visible until you re-run the analysis.
 """)
@@ -467,6 +497,7 @@ if analyze_btn and youtube_url.strip():
 
             frames = extract_frames_for_segment(video_path, seg_idx * segment_length, (seg_idx + 1) * segment_length, frames_per_segment)
 
+            # Get concepts for frames (for reference and weighting)
             frame_analyses = analyze_frames_with_clip(
                 frames,
                 model_version=model_version,
@@ -475,10 +506,14 @@ if analyze_btn and youtube_url.strip():
                 domain_shift_factor=domain_factor
             )
 
+            # Get captions for frames (primary source of faithful summary)
+            frame_captions = generate_captions_for_frames(frames)
+
             summary_status_placeholder.write("**Generating Segment Summary...**")
             summary_msg = "**Generating Segment Summary...**"
 
-            summary = generate_summary(frame_analyses, temperature=temperature, model="gpt-4", 
+            # Use frame_captions as main input, frame_analyses just to emphasize certain aspects
+            summary = generate_summary(frame_captions, frame_analyses, temperature=temperature, model="gpt-4", 
                                        additional_goals=st.session_state.personalization_data["goals"])
             summary_progress.progress(int(((seg_idx+1)/num_segments)*100))
 
@@ -499,6 +534,7 @@ if analyze_btn and youtube_url.strip():
                 "end_time": (seg_idx + 1) * segment_length,
                 "frames": frames,
                 "frame_analyses": frame_analyses,
+                "frame_captions": frame_captions,
                 "summary": summary,
                 "embedding": segment_embedding,
                 "top_concepts": list(top_concepts)
@@ -508,11 +544,15 @@ if analyze_btn and youtube_url.strip():
             # Display this segment's results immediately
             st.markdown(f"### Segment {seg_idx+1} Analysis")
             st.write(f"**Time Range:** {seg_idx * segment_length:.2f}s - {(seg_idx + 1) * segment_length:.2f}s")
-            st.write(f"**Summary:** {summary}")
+            st.write(f"**Summary (Caption-Based):** {summary}")
 
             col_left, col_right = st.columns([2,1])
             with col_left:
-                st.write("**Top Concepts per Frame:**")
+                st.write("**Frame Captions:**")
+                for i, cap in enumerate(frame_captions):
+                    st.write(f"Frame {i+1}: {cap}")
+
+                st.write("**Top Concepts per Frame (for emphasis):**")
                 for i, frame_res in enumerate(frame_analyses):
                     top_str = ", ".join([f"{desc} ({conf*100:.1f}%)" for desc, conf in frame_res])
                     st.write(f"Frame {i+1}: {top_str}")
@@ -579,7 +619,6 @@ if analyze_btn and youtube_url.strip():
 # Display previously generated step-by-step analysis if available
 ###############################################
 if st.session_state.analysis_steps is not None and st.session_state.analysis_results is not None and not analyze_btn:
-    # If we are not currently analyzing (no new button press) but have old results:
     st.markdown("<hr>", unsafe_allow_html=True)
     st.subheader("Step-by-Step Analysis (Previous Run)")
     step_col1, step_col2, step_col3 = st.columns([1,1,1])
@@ -604,7 +643,11 @@ if st.session_state.analysis_steps is not None and st.session_state.analysis_res
 
         col_left, col_right = st.columns([2,1])
         with col_left:
-            st.write("**Top Concepts per Frame:**")
+            st.write("**Frame Captions:**")
+            for i, cap in enumerate(seg_data["frame_captions"]):
+                st.write(f"Frame {i+1}: {cap}")
+
+            st.write("**Top Concepts per Frame (for emphasis):**")
             for i, frame_res in enumerate(seg_data["frame_analyses"]):
                 top_str = ", ".join([f"{desc} ({conf*100:.1f}%)" for desc, conf in frame_res])
                 st.write(f"Frame {i+1}: {top_str}")
@@ -625,8 +668,9 @@ if st.session_state.analysis_results is not None:
     st.markdown("---")
     st.header("Data Drift & Overall Results")
     st.markdown("""
-    Below is the visualization of how each segment compares to the first one, with auto-hyperparameter optimization 
-    guiding the detection of content changes. Green dots indicate stable content, while orange dots suggest drift.
+    Below is the visualization of how each segment compares to the first one, 
+    with auto-hyperparameter optimization guiding the detection of content changes.
+    Green dots indicate stable content, while orange dots suggest drift.
     """)
 
     st.write(f"**Customer Name:** {results['customer_name']}")
@@ -683,7 +727,7 @@ if st.session_state.analysis_results is not None:
 ###############################################
 st.markdown("---")
 st.write("### Personalization & Guidance")
-st.markdown("Use the controls below to fine-tune concept weights and tailor the analysis to your preferences. Auto-hyperparameter optimization helps ensure these adjustments remain intuitive and effective. Then re-run the analysis.")
+st.markdown("Use the controls below to fine-tune concept weights and tailor analysis to your preferences. Our auto-hyperparameter optimization will ensure these adjustments remain effective. Re-run the analysis to apply changes.")
 
 use_case_list = list(st.session_state.personalization_data["use_case_weights"].keys())
 selected_use_case = st.selectbox("Choose a use case:", use_case_list, 
@@ -728,7 +772,7 @@ if st.button("Update Preferences from Feedback"):
 
 st.markdown("---")
 st.write("### Personalize by Example Data")
-st.markdown("Provide lines of the form `concept,factor` to adjust weights based on example data. Auto-hyperparameter optimization will further refine these adjustments.")
+st.markdown("Provide lines of the form `concept,factor` to adjust weights. Our optimization will refine these further.")
 example_data = st.text_area("Concept adjustments (concept,factor per line):", value="")
 if st.button("Update Weights from Examples"):
     if example_data.strip():
