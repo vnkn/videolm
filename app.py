@@ -40,7 +40,7 @@ st.set_page_config(
 )
 
 # NEW: Force a visible Streamlit page title
-st.title("NomadicML Video Insights - Single-Page App")
+st.title("/n/n/n/nSingle-Page App")
 
 # ---------------------------------------------------------------------------- #
 # 2) SESSION STATE INITIALIZATION
