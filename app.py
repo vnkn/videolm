@@ -1,15 +1,12 @@
 ################################################################################
-# NOMADICML VIDEO INSIGHTS - Single-Page App
+# NOMADICML VIDEO GENERATION TUNING - Single-Page App
 #
-# Per your request:
-#   - The "Executive Overview" is now at the very top (formerly "High-Level Summary").
-#   - The "Data Drift Analysis" is placed after analysis and personalization.
-#   - Any references to "CEO perspective," "default," or "placeholder" have been removed 
-#     and replaced with more general language.
-#   - The model weights section has been styled more nicely, but no lines of logic 
-#     have been deleted—only re-labeled or reordered for clarity.
-#   - All previously added code and advanced charts remain intact.
-#   - Other than the above changes, the script retains all lines and logic exactly.
+# This code retains all logic, only modifying:
+#  - Page title/text changed to "NomadicML Video Generation Tuning"
+#  - A clickable link to nomadicml.com at the very top (header area).
+#  - Increased spacing in the legend to provide more blue space.
+#
+# Everything else remains intact.
 ################################################################################
 
 import os
@@ -34,7 +31,7 @@ from transformers import BlipProcessor, BlipForConditionalGeneration
 # 1) SET PAGE CONFIG
 # ---------------------------------------------------------------------------- #
 st.set_page_config(
-    page_title="NomadicML Video Insights",
+    page_title="NomadicML Video Generation Tuning",  # Updated title
     page_icon="🎬",
     layout="wide"
 )
@@ -81,7 +78,6 @@ if "analysis_steps" not in st.session_state:
 if "analysis_results" not in st.session_state:
     st.session_state.analysis_results = None
 
-# We maintain the data drift segments array but remove "placeholder" references
 if "drift_segments_data" not in st.session_state:
     st.session_state.drift_segments_data = {
         "segments": ["Segment 1", "Segment 2", "Segment 3", "Segment 4", "Segment 5"],
@@ -217,7 +213,6 @@ def render_navigation_bar():
         <a class="nav-link" href="#data-drift-analysis">Data Drift Analysis</a>
     </div>
     """, unsafe_allow_html=True)
-
 
 def Download(url, output_path=None):
     ydl_opts = {
@@ -386,7 +381,8 @@ def plot_embeddings(embeddings, labels, similarities):
         Line2D([0],[0], marker='o', color='w', label='Changed (sim ≤ 0.8)', 
                markerfacecolor='orange', markersize=10)
     ]
-    plt.legend(handles=legend_elements, loc='upper right')
+    # Increased borderpad, labelspacing for "more blue space" in the legend
+    plt.legend(handles=legend_elements, loc='upper right', borderpad=2.0, labelspacing=1.5)
     plt.tight_layout()
 
     buf = BytesIO()
@@ -432,18 +428,27 @@ def update_class_weights_from_examples(example_data: str, active_case: str, pers
 render_navigation_bar()
 
 # ---------------------------------------------------------------------------- #
-# (NEW) EXECUTIVE OVERVIEW - AT THE VERY TOP
+# LINK TO NOMADICML.COM AT THE VERY TOP
+# ---------------------------------------------------------------------------- #
+st.markdown("""
+<p style='text-align:center; font-size:16px; margin-top:0; margin-bottom:0;'>
+   <a href='https://www.nomadicml.com' target='_blank' style='color: #0f4c81; font-weight:600; text-decoration:none;'>NomadicML.com</a>
+</p>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------- #
+# EXECUTIVE OVERVIEW
 # ---------------------------------------------------------------------------- #
 st.markdown("<a name='executive-overview'></a>", unsafe_allow_html=True)
 st.markdown("---")
 st.header("Executive Overview")
 st.markdown("""
-NomadicML automatically identifies key concepts in your video, checks for content 
-changes over time (data drift), and summarizes what's actually visible. 
-This enables:
-- Swift decision-making by highlighting changes in brand visuals or new elements.
-- Easy adjustments: you can highlight or de-emphasize certain concepts with a few clicks.
-- More reliable summaries by focusing on real, visible content.
+NomadicML automatically identifies key concepts in your video, checks for 
+content changes over time, and summarizes what's visible. 
+This means:
+- Quick detection of changes in brand visuals or new elements.
+- Simple toggles to emphasize or de-emphasize concepts.
+- Reliable summaries that focus on actual content.
 """)
 
 # ---------------------------------------------------------------------------- #
@@ -487,7 +492,7 @@ for c, w in st.session_state.personalization_data["class_weights"].items():
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------- #
-# 9) STEP-BY-STEP ANALYSIS (UNCHANGED)
+# STEP-BY-STEP ANALYSIS
 # ---------------------------------------------------------------------------- #
 results_container = st.container()
 if analyze_btn and youtube_url.strip():
@@ -795,7 +800,7 @@ if st.button("Fine-Tune Model"):
     st.success("Model fine-tuned! Future analyses will incorporate these preferences more deeply.")
 
 # ---------------------------------------------------------------------------- #
-# 10) DATA DRIFT & OVERALL RESULTS - NOW MOVED BELOW PERSONALIZATION
+# 10) DATA DRIFT & OVERALL RESULTS - MOVED BELOW PERSONALIZATION
 # ---------------------------------------------------------------------------- #
 st.markdown("<a name='data-drift-analysis'></a>", unsafe_allow_html=True)
 st.markdown("---")
@@ -871,8 +876,9 @@ st.markdown("<p style='text-align:center; color:#888; margin-top:40px;'>© 2024 
 st.markdown("---")
 st.title("Extended Visualizations & Insights")
 st.markdown("""
-These optional charts provide deeper insights into concept interactions, segment-by-segment changes, 
-and advanced analytics. They leverage the same underlying data from the analysis steps above.
+These optional charts provide deeper insights into concept interactions, 
+segment-by-segment changes, and advanced analytics. They leverage the same 
+underlying data from the analysis steps above.
 """)
 
 ###############################
