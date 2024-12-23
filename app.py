@@ -40,7 +40,7 @@ st.set_page_config(
 )
 
 # NEW: Force a visible Streamlit page title
-st.title("/n/n/n/nSingle-Page App")
+st.markdown("<h1 style='text-align:center;'>NomadicML Video Tuning Demo</h1>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------- #
 # 2) SESSION STATE INITIALIZATION
