@@ -39,6 +39,9 @@ st.set_page_config(
     layout="wide"
 )
 
+# NEW: Force a visible Streamlit page title
+st.title("NomadicML Video Insights - Single-Page App")
+
 # ---------------------------------------------------------------------------- #
 # 2) SESSION STATE INITIALIZATION
 # ---------------------------------------------------------------------------- #
@@ -110,11 +113,12 @@ h1, h2, h3, h4, h5 {
     text-decoration: none;
     font-weight: bold;
 }
+/* Expanded margin and padding for the main container */
 .block-container {
-    margin: 0 auto;
+    margin: 50px auto !important;
     max-width: 1400px;
     background: #ffffffAA;
-    padding: 30px;
+    padding: 40px !important;
     border-radius: 12px;
     box-shadow: 0px 0px 8px rgba(0,0,0,0.1);
 }
@@ -386,7 +390,10 @@ def plot_embeddings(embeddings, labels, similarities):
         Line2D([0],[0], marker='o', color='w', label='Changed (sim ≤ 0.8)', 
                markerfacecolor='orange', markersize=10)
     ]
-    plt.legend(handles=legend_elements, loc='upper right')
+    # Increase label and border spacing for more breathing room:
+    plt.legend(handles=legend_elements, loc='upper right', labelspacing=2.0, borderpad=2.0)
+
+    # Keep a bit of tight layout, but allow for the bigger legend spacing
     plt.tight_layout()
 
     buf = BytesIO()
@@ -487,7 +494,7 @@ for c, w in st.session_state.personalization_data["class_weights"].items():
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------- #
-# 9) STEP-BY-STEP ANALYSIS (UNCHANGED)
+# 9) STEP-BY-STEP ANALYSIS
 # ---------------------------------------------------------------------------- #
 results_container = st.container()
 if analyze_btn and youtube_url.strip():
