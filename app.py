@@ -1,17 +1,3 @@
-################################################################################
-# NOMADICML VIDEO INSIGHTS - Single-Page App
-#
-# Per your request:
-#   - The "Executive Overview" is now at the very top (formerly "High-Level Summary").
-#   - The "Data Drift Analysis" is placed after analysis and personalization.
-#   - Any references to "CEO perspective," "default," or "placeholder" have been removed 
-#     and replaced with more general language.
-#   - The model weights section has been styled more nicely, but no lines of logic 
-#     have been deleted—only re-labeled or reordered for clarity.
-#   - All previously added code and advanced charts remain intact.
-#   - Other than the above changes, the script retains all lines and logic exactly.
-################################################################################
-
 import os
 import tempfile
 import cv2
@@ -20,18 +6,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 from io import BytesIO
 from PIL import Image
-from typing import List
+from typing import List, Dict
 from sklearn.decomposition import PCA
 from transformers import CLIPProcessor, CLIPModel
 from openai import OpenAI
 import streamlit as st
 import pandas as pd
-from pytubefix import YouTube
 import yt_dlp
 from transformers import BlipProcessor, BlipForConditionalGeneration
+import json
 
 # ---------------------------------------------------------------------------- #
-# 1) SET PAGE CONFIG
+# STREAMLIT PAGE CONFIG
 # ---------------------------------------------------------------------------- #
 st.set_page_config(
     page_title="NomadicML Video Insights",
@@ -39,42 +25,24 @@ st.set_page_config(
     layout="wide"
 )
 
-# NEW: Force a visible Streamlit page title
 st.markdown("<h1 style='text-align:center;'>NomadicML Video Tuning Demo</h1>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------- #
-# 2) SESSION STATE INITIALIZATION
+# SESSION STATE
 # ---------------------------------------------------------------------------- #
 if "personalization_data" not in st.session_state:
     st.session_state.personalization_data = {
-        "class_weights": {
-            "water": 1.0,
-            "trees": 1.0,
-            "landscape": 1.0,
-            "person": 1.0,
-            "forest": 1.0
-        },
+        "class_weights": {},
         "feedback_history": [],
         "fine_tuned": False,
         "goals": "",
         "preferred_concepts": [],
         "use_case_weights": {
-            "Outdoor Adventure": {
-                "water": 1.0,
-                "trees": 1.0,
-                "landscape": 1.0,
-                "forest": 1.0,
-                "mountains": 1.0
-            },
-            "Wildlife Documentary": {
-                "animals": 1.0,
-                "person": 0.8,
-                "forest": 1.2,
-                "landscape": 0.9
-            }
+            "Outdoor Adventure": {},
+            "Wildlife Documentary": {}
         },
         "active_use_case": "Outdoor Adventure",
-        "customer_name": "Default Customer",
+        "customer_name": "New Customer",
         "model_version": "openai/clip-vit-base-patch32"
     }
 
@@ -84,19 +52,19 @@ if "analysis_steps" not in st.session_state:
 if "analysis_results" not in st.session_state:
     st.session_state.analysis_results = None
 
-# We maintain the data drift segments array but remove "placeholder" references
 if "drift_segments_data" not in st.session_state:
     st.session_state.drift_segments_data = {
         "segments": ["Segment 1", "Segment 2", "Segment 3", "Segment 4", "Segment 5"],
-        "similarities": np.random.uniform(0.7, 0.95, 5)  
+        "similarities": np.random.uniform(0.7, 0.95, 5)
     }
 
 os.environ["OPENAI_API_KEY"] = os.environ.get("OPENAI_API_KEY", "")
 
 # ---------------------------------------------------------------------------- #
-# 3) CUSTOM CSS
+# CUSTOM STYLES
 # ---------------------------------------------------------------------------- #
-st.markdown("""
+st.markdown(
+    """
 <style>
 body {
     font-family: "Open Sans", sans-serif;
@@ -113,7 +81,6 @@ h1, h2, h3, h4, h5 {
     text-decoration: none;
     font-weight: bold;
 }
-/* Expanded margin and padding for the main container */
 .block-container {
     margin: 50px auto !important;
     max-width: 1400px;
@@ -168,7 +135,6 @@ footer {visibility: hidden;}
     height: 10px;
     background: #0f4c81;
 }
-/* Minimalist Nav Bar */
 .nav-container {
     background-color: #e8f1f9;
     padding: 10px;
@@ -189,7 +155,6 @@ footer {visibility: hidden;}
 .nav-link:hover {
     background-color: #cde2f1;
 }
-/* Make model weights look nicer */
 .nicer-weights-container {
     background-color: #f8fafc;
     border-radius: 8px;
@@ -207,10 +172,12 @@ footer {visibility: hidden;}
     padding: 3px 0;
 }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True
+)
 
 # ---------------------------------------------------------------------------- #
-# 4) HELPER FUNCTIONS
+# NAV BAR
 # ---------------------------------------------------------------------------- #
 def render_navigation_bar():
     st.markdown("""
@@ -222,10 +189,68 @@ def render_navigation_bar():
     </div>
     """, unsafe_allow_html=True)
 
+# ---------------------------------------------------------------------------- #
+# GPT-BASED CONCEPT EXTRACTION
+# ---------------------------------------------------------------------------- #
+def extract_concepts_gpt(text: str, threshold: float = 0.4) -> Dict[str, float]:
+    """
+    Calls OpenAI GPT to extract a list of { "keyword": "...", "score": 0.x } items,
+    and we only keep those with score >= threshold.
+    """
+    try:
+        client = OpenAI()
+    except Exception as e:
+        st.error(f"Error initializing OpenAI: {e}")
+        return {}
 
+    system_message = (
+        "You are a helpful assistant that extracts semantically important concepts or keywords "
+        "from the user's text. Return them as valid JSON, e.g. "
+        "[{\"keyword\": \"James Bond\", \"score\": 0.9}, {\"keyword\": \"Villain\", \"score\": 0.7}] "
+        "Scores range from 0.0 to 1.0."
+    )
+    user_message = f"Text: {text}\n\nExtract key concepts or keywords with a score for each."
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message}
+            ],
+            temperature=0.0,
+            max_tokens=200
+        )
+        raw_str = resp.choices[0].message.content.strip()
+        data = json.loads(raw_str)
+        out = {}
+        if isinstance(data, list):
+            for item in data:
+                kw = item.get("keyword", "").strip()
+                sc = float(item.get("score", 0.0))
+                if kw and sc >= threshold:
+                    out[kw] = sc
+        return out
+    except Exception as ex:
+        st.warning(f"Extraction error: {ex}")
+        return {}
+
+def apply_extracted_concepts(text: str, threshold: float = 0.4):
+    """
+    Clears and sets st.session_state.personalization_data["class_weights"] 
+    with whatever GPT returns above the threshold.
+    """
+    new_cs = extract_concepts_gpt(text, threshold=threshold)
+    st.session_state.personalization_data["class_weights"].clear()
+    for k, v in new_cs.items():
+        st.session_state.personalization_data["class_weights"][k] = v
+
+# ---------------------------------------------------------------------------- #
+# HELPER: DOWNLOAD
+# ---------------------------------------------------------------------------- #
 def Download(url, output_path=None):
     ydl_opts = {
-        'format': 'best', 
+        'format': 'best',
         'outtmpl': '%(title)s.%(ext)s' if not output_path else output_path,
     }
     try:
@@ -236,6 +261,9 @@ def Download(url, output_path=None):
         print(f"An error occurred: {str(e)}")
         return None
 
+# ---------------------------------------------------------------------------- #
+# HELPER: GET VIDEO DURATION
+# ---------------------------------------------------------------------------- #
 def get_video_duration(video_path: str) -> float:
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -245,6 +273,9 @@ def get_video_duration(video_path: str) -> float:
         return 0.0
     return frame_count / fps
 
+# ---------------------------------------------------------------------------- #
+# HELPER: EXTRACT SEGMENT FRAMES
+# ---------------------------------------------------------------------------- #
 def extract_frames_for_segment(video_path: str, start_time: float, end_time: float, num_frames: int) -> List[Image.Image]:
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -273,6 +304,9 @@ def extract_frames_for_segment(video_path: str, start_time: float, end_time: flo
     cap.release()
     return frames
 
+# ---------------------------------------------------------------------------- #
+# HELPER: CLIP EMBEDDINGS
+# ---------------------------------------------------------------------------- #
 def compute_clip_embeddings(frames: List[Image.Image], model_version="openai/clip-vit-base-patch32") -> torch.Tensor:
     processor = CLIPProcessor.from_pretrained(model_version)
     model = CLIPModel.from_pretrained(model_version)
@@ -282,7 +316,19 @@ def compute_clip_embeddings(frames: List[Image.Image], model_version="openai/cli
     embeddings = outputs / outputs.norm(p=2, dim=-1, keepdim=True)
     return embeddings
 
-def analyze_frames_with_clip(frames, model_version, candidate_descriptions, class_weights, domain_shift_factor=1.0):
+# ---------------------------------------------------------------------------- #
+# HELPER: ANALYZE FRAMES WITH CLIP
+# ---------------------------------------------------------------------------- #
+def analyze_frames_with_clip(
+    frames,
+    model_version,
+    candidate_descriptions,
+    class_weights,
+    domain_shift_factor=1.0
+):
+    if not candidate_descriptions:
+        return [[] for _ in frames]
+
     processor = CLIPProcessor.from_pretrained(model_version)
     model = CLIPModel.from_pretrained(model_version)
 
@@ -291,6 +337,7 @@ def analyze_frames_with_clip(frames, model_version, candidate_descriptions, clas
         inputs = processor(images=frame, text=candidate_descriptions, return_tensors="pt", padding=True)
         with torch.no_grad():
             outputs = model(**inputs)
+
         probs = outputs.logits_per_image.softmax(dim=1)[0] * domain_shift_factor
 
         weighted_probs = []
@@ -299,14 +346,27 @@ def analyze_frames_with_clip(frames, model_version, candidate_descriptions, clas
             weighted_probs.append(probs[i] * w)
 
         weighted_probs = torch.tensor(weighted_probs)
-        weighted_probs = weighted_probs / weighted_probs.sum()
+        if weighted_probs.sum() > 0:
+            weighted_probs = weighted_probs / weighted_probs.sum()
+        else:
+            weighted_probs = torch.zeros_like(weighted_probs)
 
-        top_probs, top_indices = torch.topk(weighted_probs, k=5)
-        frame_results = [(candidate_descriptions[idx], float(prob.item())) for idx, prob in zip(top_indices, top_probs)]
+        top_k_count = min(len(weighted_probs), 5)
+        if top_k_count == 0:
+            frame_results = []
+        else:
+            top_vals, top_indices = torch.topk(weighted_probs, k=top_k_count)
+            frame_results = []
+            for val, idx_ in zip(top_vals, top_indices):
+                frame_results.append((candidate_descriptions[idx_], float(val.item())))
+
         all_frame_results.append(frame_results)
 
     return all_frame_results
 
+# ---------------------------------------------------------------------------- #
+# HELPER: CAPTIONING
+# ---------------------------------------------------------------------------- #
 def load_captioning_model():
     blip_model_name = "Salesforce/blip-image-captioning-base"
     processor = BlipProcessor.from_pretrained(blip_model_name)
@@ -327,30 +387,48 @@ def generate_captions_for_frames(frames: List[Image.Image]) -> List[str]:
         captions.append(caption)
     return captions
 
+# ---------------------------------------------------------------------------- #
+# HELPER: SUMMARY WITH WEIGHTS (Cinematic Style)
+# ---------------------------------------------------------------------------- #
 def generate_summary(frame_captions, frame_concepts, temperature, model, additional_goals):
+    """
+    Produces a short cinematic paragraph for each segment, emphasizing higher-weight concepts.
+    """
     try:
         client = OpenAI()
     except Exception as e:
         return f"Error initializing OpenAI client: {e}"
 
+    # Build a text representation of each frame’s data
     frame_descriptions = []
     for i, caption in enumerate(frame_captions):
         if i < len(frame_concepts):
             top_concepts_str = ", ".join([f"{desc} ({conf*100:.1f}%)" for desc, conf in frame_concepts[i]])
-            frame_descriptions.append(f"Frame {i+1}: Caption: '{caption}' | Concepts: {top_concepts_str}")
+            frame_descriptions.append(
+                f"Frame {i+1}: Caption='{caption}' WeightedConcepts={top_concepts_str}"
+            )
         else:
-            frame_descriptions.append(f"Frame {i+1}: Caption: '{caption}'")
+            frame_descriptions.append(f"Frame {i+1}: Caption='{caption}'")
 
-    system_message = "You are a friendly video summarizer who focuses on what is actually visible in the video."
-    user_prompt = f"""We analyzed each part of the video and generated captions for each frame:
+    # Encourage GPT to be cinematic, referencing highest-weight concepts more strongly
+    system_message = (
+        "You are a video summarizer who focuses on what's visually present. "
+        "Write a short cinematic paragraph (3–5 sentences) capturing the frames. "
+        "Highlight higher-weighted concepts more. If relevant, mention lower-weight items briefly."
+    )
+
+    user_prompt = f"""
+We have frames from a video segment, each with an auto-generated caption and WeightedConcepts:
 
 {chr(10).join(frame_descriptions)}
 
-From these captions, please write a short, friendly summary of this segment, focusing primarily on what's actually visible in the video. 
-Use the concepts only as subtle emphasis. If the user has additional goals or aspects to emphasize, incorporate that softly.
-
-Additional goals or instructions from the user:
+User's additional goals:
 {additional_goals}
+
+Your task:
+1) Provide a concise, cinematic paragraph summarizing what's happening.
+2) Emphasize higher-weighted concepts more.
+3) Reference any lower-weight items if they help the narrative.
 """
 
     response = client.chat.completions.create(
@@ -360,10 +438,14 @@ Additional goals or instructions from the user:
             {"role": "user", "content": user_prompt}
         ],
         temperature=temperature,
-        max_tokens=150
+        max_tokens=250
     )
+
     return response.choices[0].message.content.strip()
 
+# ---------------------------------------------------------------------------- #
+# HELPER: PLOT EMBEDDINGS
+# ---------------------------------------------------------------------------- #
 def plot_embeddings(embeddings, labels, similarities):
     x = embeddings[:,0]
     y = embeddings[:,1]
@@ -383,17 +465,14 @@ def plot_embeddings(embeddings, labels, similarities):
 
     from matplotlib.lines import Line2D
     legend_elements = [
-        Line2D([0],[0], marker='*', color='w', label='First Part (Reference)', 
+        Line2D([0],[0], marker='*', color='w', label='First Part (Reference)',
                markerfacecolor='red', markersize=15),
-        Line2D([0],[0], marker='o', color='w', label='Stable (sim > 0.8)', 
+        Line2D([0],[0], marker='o', color='w', label='Stable (sim>0.8)',
                markerfacecolor='green', markersize=10),
-        Line2D([0],[0], marker='o', color='w', label='Changed (sim ≤ 0.8)', 
+        Line2D([0],[0], marker='o', color='w', label='Changed (sim<=0.8)',
                markerfacecolor='orange', markersize=10)
     ]
-    # Increase label and border spacing for more breathing room:
     plt.legend(handles=legend_elements, loc='upper right', labelspacing=2.0, borderpad=2.0)
-
-    # Keep a bit of tight layout, but allow for the bigger legend spacing
     plt.tight_layout()
 
     buf = BytesIO()
@@ -402,6 +481,9 @@ def plot_embeddings(embeddings, labels, similarities):
     buf.seek(0)
     return Image.open(buf)
 
+# ---------------------------------------------------------------------------- #
+# HELPER: FEEDBACK & EXAMPLE UPDATING
+# ---------------------------------------------------------------------------- #
 def update_class_weights_from_feedback(feedback_data, personalization_data):
     for concept, rating in feedback_data.items():
         if rating == "👍":
@@ -434,34 +516,39 @@ def update_class_weights_from_examples(example_data: str, active_case: str, pers
             personalization_data["class_weights"][c] = w
 
 # ---------------------------------------------------------------------------- #
-# 5) NAVIGATION BAR
+# RENDER NAV BAR
 # ---------------------------------------------------------------------------- #
 render_navigation_bar()
 
 # ---------------------------------------------------------------------------- #
-# (NEW) EXECUTIVE OVERVIEW - AT THE VERY TOP
+# EXEC OVERVIEW
 # ---------------------------------------------------------------------------- #
 st.markdown("<a name='executive-overview'></a>", unsafe_allow_html=True)
 st.markdown("---")
 st.header("Executive Overview")
 st.markdown("""
-NomadicML automatically identifies key concepts in your video, checks for content 
-changes over time (data drift), and summarizes what's actually visible. 
-This enables:
-- Swift decision-making by highlighting changes in brand visuals or new elements.
-- Easy adjustments: you can highlight or de-emphasize certain concepts with a few clicks.
-- More reliable summaries by focusing on real, visible content.
+This demo **dynamically** extracts key concepts (and their scores) from your text via an OpenAI GPT-based approach. 
+It then uses CLIP to analyze the presence of those concepts in the video frames, weighting each concept’s probability by the GPT-derived score.
+Finally, each segment’s frames are summarized in a short, cinematic paragraph that emphasizes the highest-weight concepts.
 """)
 
 # ---------------------------------------------------------------------------- #
-# VIDEO ANALYSIS SECTION
+# VIDEO ANALYSIS
 # ---------------------------------------------------------------------------- #
 st.markdown("<a name='video-analysis'></a>", unsafe_allow_html=True)
 st.markdown("---")
 st.header("Video Analysis")
-st.markdown("Enter a YouTube URL, adjust parameters, then click **Generate Summary & Analyze Video**.")
 
-youtube_url = st.text_input("Enter the YouTube video URL to analyze:", value="https://www.youtube.com/watch?v=jNQXAC9IVRw")
+youtube_url = st.text_input("Enter the YouTube video URL to analyze:", value="")
+video_description = st.text_area(
+    "Enter a short description or storyline of the video. GPT will identify top concepts (score>=0.4).",
+    value="",
+    height=150
+)
+
+if st.button("Extract & Weigh Concepts with GPT"):
+    apply_extracted_concepts(video_description, threshold=0.4)
+    st.success("Concepts extracted from GPT and assigned dynamic weights!")
 
 fast_mode = st.checkbox("Fast Mode (quicker but fewer frames)", value=False)
 if fast_mode:
@@ -476,33 +563,32 @@ domain_shift = st.selectbox("Scene Condition (Apply domain shift factor):", ["No
 domain_factor_map = {"None": 1.0, "Fog": 0.9, "Night": 0.8}
 domain_factor = domain_factor_map[domain_shift]
 
-candidate_descriptions_str = st.text_area(
-    "Candidate Concepts (comma-separated):", 
-    "water, rocks, trees, landscape, nature, forest, person, mountains"
-)
-candidate_descriptions = [x.strip() for x in candidate_descriptions_str.split(',') if x.strip()]
+# ---------------------------------------------------------------------------- #
+# DISPLAY CURRENT CONCEPTS & WEIGHTS
+# ---------------------------------------------------------------------------- #
+st.markdown("#### Current Extracted Concepts & Weights")
+if not st.session_state.personalization_data["class_weights"]:
+    st.info("No GPT-extracted concepts yet. Provide a description above, then click the extraction button.")
+else:
+    st.markdown("<div class='nicer-weights-container'>", unsafe_allow_html=True)
+    st.markdown("<div class='nicer-weights-title'>Current Model Weights</div>", unsafe_allow_html=True)
+    for c in sorted(st.session_state.personalization_data["class_weights"].keys()):
+        w = st.session_state.personalization_data["class_weights"][c]
+        st.markdown(f"<div class='nicer-weights-item'>• <strong>{c}</strong>: {w:.2f}</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
+# ---------------------------------------------------------------------------- #
+# MAIN ANALYSIS BUTTON
+# ---------------------------------------------------------------------------- #
 analyze_btn = st.button("Generate Summary & Analyze Video")
 
-# ---------------------------------------------------------------------------- #
-# NICER MODEL WEIGHTS - Display them in a nicer container
-# ---------------------------------------------------------------------------- #
-st.markdown("<div class='nicer-weights-container'>", unsafe_allow_html=True)
-st.markdown("<div class='nicer-weights-title'>Current Model Weights</div>", unsafe_allow_html=True)
-for c, w in st.session_state.personalization_data["class_weights"].items():
-    st.markdown(f"<div class='nicer-weights-item'>• <strong>{c}</strong>: {w}</div>", unsafe_allow_html=True)
-st.markdown("</div>", unsafe_allow_html=True)
-
-# ---------------------------------------------------------------------------- #
-# 9) STEP-BY-STEP ANALYSIS
-# ---------------------------------------------------------------------------- #
-results_container = st.container()
 if analyze_btn and youtube_url.strip():
     st.markdown("----")
     st.subheader("Step-by-Step Analysis")
 
     model_version = st.session_state.personalization_data["model_version"]
     combined_class_weights = dict(st.session_state.personalization_data["class_weights"])
+    candidate_descriptions = list(combined_class_weights.keys())
 
     col1, col2, col3 = st.columns([1,1,1])
     with col1:
@@ -542,7 +628,7 @@ if analyze_btn and youtube_url.strip():
 
     duration = get_video_duration(video_path)
     if duration <= 0:
-        st.error("Could not determine video duration or video is empty.")
+        st.error("Could not determine video duration or the video is empty.")
         st.session_state.analysis_steps = {
             "download_msg": download_msg,
             "processing_msg": "**Error:** Could not determine video duration.",
@@ -559,10 +645,15 @@ if analyze_btn and youtube_url.strip():
         processing_status_placeholder.write(status)
         processing_msg = status
 
-        frames = extract_frames_for_segment(video_path, seg_idx * segment_length, (seg_idx + 1) * segment_length, frames_per_segment)
+        frames = extract_frames_for_segment(
+            video_path,
+            seg_idx * segment_length,
+            (seg_idx + 1) * segment_length,
+            frames_per_segment
+        )
 
         frame_analyses = analyze_frames_with_clip(
-            frames,
+            frames=frames,
             model_version=model_version,
             candidate_descriptions=candidate_descriptions,
             class_weights=combined_class_weights,
@@ -571,10 +662,11 @@ if analyze_btn and youtube_url.strip():
 
         frame_captions = generate_captions_for_frames(frames)
 
-        summary_status_placeholder.write("**Generating Segment Summary...**")
-        summary_msg = "**Generating Segment Summary...**"
+        summary_status_placeholder.write("**Generating Segment Summary (Weighted)**")
+        summary_msg = "**Generating Segment Summary (Weighted)**"
 
-        summary = generate_summary(
+        # Call the new cinematic generate_summary
+        summary_text = generate_summary(
             frame_captions,
             frame_analyses,
             temperature=temperature,
@@ -601,7 +693,7 @@ if analyze_btn and youtube_url.strip():
             "frames": frames,
             "frame_analyses": frame_analyses,
             "frame_captions": frame_captions,
-            "summary": summary,
+            "summary": summary_text,
             "embedding": segment_embedding,
             "top_concepts": list(top_concepts)
         }
@@ -609,7 +701,7 @@ if analyze_btn and youtube_url.strip():
 
         st.markdown(f"### Segment {seg_idx+1} Analysis")
         st.write(f"**Time Range:** {seg_idx * segment_length:.2f}s - {(seg_idx + 1) * segment_length:.2f}s")
-        st.write(f"**Summary (Caption-Based):** {summary}")
+        st.write(f"**Weighted Cinematic Summary:** {summary_text}")
 
         c1, c2 = st.columns([2,1])
         with c1:
@@ -617,10 +709,11 @@ if analyze_btn and youtube_url.strip():
             for i, cap in enumerate(frame_captions):
                 st.write(f"Frame {i+1}: {cap}")
 
-            st.write("**Top Concepts per Frame (for emphasis):**")
+            st.write("**Top Weighted Concepts per Frame:**")
             for i, frame_res in enumerate(frame_analyses):
                 top_str = ", ".join([f"{desc} ({conf*100:.1f}%)" for desc, conf in frame_res])
                 st.write(f"Frame {i+1}: {top_str}")
+
         with c2:
             st.write("**Frames:**")
             for i, f_ in enumerate(frames):
@@ -632,8 +725,8 @@ if analyze_btn and youtube_url.strip():
     processing_status_placeholder.write("**All segments processed!**")
     processing_msg = "**All segments processed!**"
 
-    summary_status_placeholder.write("**All summaries generated!**")
-    summary_msg = "**All summaries generated!**"
+    summary_status_placeholder.write("**All Weighted Summaries Generated!**")
+    summary_msg = "**All Weighted Summaries Generated!**"
 
     all_embeddings = np.vstack([seg["embedding"] for seg in segment_info])
     if all_embeddings.shape[0] > 1:
@@ -679,6 +772,7 @@ if analyze_btn and youtube_url.strip():
 elif st.session_state.analysis_steps is not None and st.session_state.analysis_results is not None:
     st.markdown("----")
     st.subheader("Step-by-Step Analysis (Previous Run)")
+
     col1, col2, col3 = st.columns([1,1,1])
     with col1:
         st.markdown("#### 1. Downloading Video")
@@ -694,7 +788,7 @@ elif st.session_state.analysis_steps is not None and st.session_state.analysis_r
         seg_idx = seg_data["segment_index"]
         st.markdown(f"### Segment {seg_idx+1} Analysis (Previous Run)")
         st.write(f"**Time Range:** {seg_data['start_time']:.2f}s - {seg_data['end_time']:.2f}s")
-        st.write(f"**Summary:** {seg_data['summary']}")
+        st.write(f"**Weighted Cinematic Summary:** {seg_data['summary']}")
 
         c1, c2 = st.columns([2,1])
         with c1:
@@ -702,29 +796,29 @@ elif st.session_state.analysis_steps is not None and st.session_state.analysis_r
             for i, cap in enumerate(seg_data["frame_captions"]):
                 st.write(f"Frame {i+1}: {cap}")
 
-            st.write("**Top Concepts per Frame (for emphasis):**")
+            st.write("**Top Weighted Concepts per Frame:**")
             for i, frame_res in enumerate(seg_data["frame_analyses"]):
                 top_str = ", ".join([f"{desc} ({conf*100:.1f}%)" for desc, conf in frame_res])
                 st.write(f"Frame {i+1}: {top_str}")
+
         with c2:
             st.write("**Frames:**")
             for i, f_ in enumerate(seg_data["frames"]):
                 st.image(f_, caption=f"Frame {i+1}")
+
         st.write("---")
 
 # ---------------------------------------------------------------------------- #
-# 11) PERSONALIZATION & GUIDANCE
+# PERSONALIZATION
 # ---------------------------------------------------------------------------- #
 st.markdown("<a name='personalization--guidance'></a>", unsafe_allow_html=True)
 st.markdown("---")
 st.header("Personalization & Guidance")
-st.markdown("""
-Use these controls to tailor the analysis to your preferences. 
-Our auto-hyperparameter optimization ensures your changes remain balanced with other parameters.
-""")
 
 use_case_list = list(st.session_state.personalization_data["use_case_weights"].keys())
-selected_use_case = st.selectbox("Choose a use case:", use_case_list, 
+selected_use_case = st.selectbox(
+    "Choose a use case:",
+    use_case_list,
     index=use_case_list.index(st.session_state.personalization_data["active_use_case"])
 )
 st.session_state.personalization_data["active_use_case"] = selected_use_case
@@ -738,19 +832,21 @@ st.subheader("Fine-Tune Concept Weights")
 with st.expander("Adjust Weights", expanded=True):
     for c in sorted(st.session_state.personalization_data["class_weights"].keys()):
         current_weight = st.session_state.personalization_data["class_weights"][c]
-        new_weight = st.slider(f"{c}", 0.0, 5.0, current_weight, 0.1, key=f"slider_{c}")
+        new_weight = st.slider(f"{c}", 0.0, 5.0, float(current_weight), 0.1, key=f"slider_{c}")
         st.session_state.personalization_data["class_weights"][c] = new_weight
 
 st.subheader("Your Summary Goals")
 st.session_state.personalization_data["goals"] = st.text_area(
     "Provide any high-level goals or aspects to emphasize in your segment summaries.",
-    value=st.session_state.personalization_data["goals"], 
+    value=st.session_state.personalization_data["goals"],
     height=80
 )
 
 st.subheader("Your Preferred Concepts")
-preferred_concepts_str = st.text_input("Add additional concepts (comma-separated):", 
-                                       value=", ".join(st.session_state.personalization_data["preferred_concepts"]))
+preferred_concepts_str = st.text_input(
+    "Add additional concepts (comma-separated):",
+    value=", ".join(st.session_state.personalization_data["preferred_concepts"])
+)
 if preferred_concepts_str.strip():
     st.session_state.personalization_data["preferred_concepts"] = [
         c.strip() for c in preferred_concepts_str.split(",") if c.strip()
@@ -767,7 +863,12 @@ else:
     concept_list = sorted(all_current_concepts)
     fb_cols = st.columns(min(len(concept_list), 4))
     for i, concept in enumerate(concept_list):
-        fb = fb_cols[i % 4].selectbox(f"'{concept}' feedback", ["No Feedback", "👍", "👎"], index=0, key=f"feedback_{concept}")
+        fb = fb_cols[i % 4].selectbox(
+            f"'{concept}' feedback",
+            ["No Feedback", "👍", "👎"],
+            index=0,
+            key=f"feedback_{concept}"
+        )
         feedback_data[concept] = fb
 
 if st.button("Update Preferences from Feedback"):
@@ -802,7 +903,7 @@ if st.button("Fine-Tune Model"):
     st.success("Model fine-tuned! Future analyses will incorporate these preferences more deeply.")
 
 # ---------------------------------------------------------------------------- #
-# 10) DATA DRIFT & OVERALL RESULTS - NOW MOVED BELOW PERSONALIZATION
+# DATA DRIFT
 # ---------------------------------------------------------------------------- #
 st.markdown("<a name='data-drift-analysis'></a>", unsafe_allow_html=True)
 st.markdown("---")
@@ -813,11 +914,9 @@ if st.session_state.analysis_results is not None:
     segment_info = results["segment_info"]
 
     st.markdown("""
-    Below is the visualization of how each segment compares to the first one, 
-    with auto-hyperparameter optimization guiding the detection of any changes.
+    Below is the visualization of how each segment compares to the first one. 
     Green dots indicate stable content, while orange dots suggest drift.
     """)
-
     st.write(f"**Customer Name:** {results['customer_name']}")
     st.write(f"**Model Used:** {results['model_version']}")
     st.write(f"**Video URL:** {results['video_url']}")
@@ -863,34 +962,28 @@ if st.session_state.analysis_results is not None:
     df_concepts.set_index("segment", inplace=True)
     st.subheader("Concept Probability Over Time")
     st.area_chart(df_concepts)
-
 else:
     st.info("No analysis results available. Once you analyze a video, this section will update.")
 
-# ---------------------------------------------------------------------------- #
-# 12) FOOTER
-# ---------------------------------------------------------------------------- #
-st.markdown("<p style='text-align:center; color:#888; margin-top:40px;'>© 2024 NomadicML - Demo application. Learn more at <a href='https://www.nomadicml.com' target='_blank'>https://www.nomadicml.com</a></p>", unsafe_allow_html=True)
+st.markdown(
+    "<p style='text-align:center; color:#888; margin-top:40px;'>© 2024 NomadicML - Demo application.</p>",
+    unsafe_allow_html=True
+)
 
-################################################################################
-# 13) ADDITIONAL CHARTS & VISUALIZATIONS
-################################################################################
+# ---------------------------------------------------------------------------- #
+# EXTENDED VISUALIZATIONS & INSIGHTS
+# ---------------------------------------------------------------------------- #
 st.markdown("---")
 st.title("Extended Visualizations & Insights")
 st.markdown("""
 These optional charts provide deeper insights into concept interactions, segment-by-segment changes, 
-and advanced analytics. They leverage the same underlying data from the analysis steps above.
+and advanced analytics.
 """)
 
-###############################
-# Chart 1: Concept Correlation
-###############################
+# ---------------------------------------------------------------------------- #
+# 1) CONCEPT CORRELATION HEATMAP
+# ---------------------------------------------------------------------------- #
 st.markdown("## 1. Concept Correlation Heatmap")
-st.markdown("""
-This chart attempts to visualize how different concepts correlate across segments 
-based on their probabilities.
-""")
-
 def create_concept_correlation_heatmap(df_concepts: pd.DataFrame):
     if df_concepts.shape[0] > 1:
         corr_matrix = df_concepts.corr()
@@ -909,33 +1002,32 @@ def create_concept_correlation_heatmap(df_concepts: pd.DataFrame):
         return None
 
 if st.session_state.analysis_results is not None:
-    df_concepts_corr = st.session_state.analysis_results.get("df_concepts_corr", None)
-    if not df_concepts_corr:
-        segment_info = st.session_state.analysis_results["segment_info"]
-        all_concepts = set()
-        for seg in segment_info:
-            for frame_res in seg["frame_analyses"]:
-                for desc, conf in frame_res:
-                    all_concepts.add(desc)
-        segment_concept_data = []
-        for seg in segment_info:
-            concept_sums = {c:0.0 for c in all_concepts}
-            concept_counts = {c:0 for c in all_concepts}
-            for frame_res in seg["frame_analyses"]:
-                for desc, conf in frame_res:
-                    concept_sums[desc] += conf
-                    concept_counts[desc] += 1
-            concept_avgs = {}
-            for c in all_concepts:
-                if concept_counts[c] > 0:
-                    concept_avgs[c] = concept_sums[c] / concept_counts[c]
-                else:
-                    concept_avgs[c] = 0.0
-            concept_avgs["segment"] = seg["segment_index"]+1
-            segment_concept_data.append(concept_avgs)
-        df_concepts_corr = pd.DataFrame(segment_concept_data)
-        df_concepts_corr.set_index("segment", inplace=True)
+    segment_info = st.session_state.analysis_results["segment_info"]
+    all_concepts = set()
+    for seg in segment_info:
+        for frame_res in seg["frame_analyses"]:
+            for desc, conf in frame_res:
+                all_concepts.add(desc)
 
+    segment_concept_data = []
+    for seg in segment_info:
+        concept_sums = {c:0.0 for c in all_concepts}
+        concept_counts = {c:0 for c in all_concepts}
+        for frame_res in seg["frame_analyses"]:
+            for desc, conf in frame_res:
+                concept_sums[desc] += conf
+                concept_counts[desc] += 1
+        concept_avgs = {}
+        for c in all_concepts:
+            if concept_counts[c] > 0:
+                concept_avgs[c] = concept_sums[c] / concept_counts[c]
+            else:
+                concept_avgs[c] = 0.0
+        concept_avgs["segment"] = seg["segment_index"]+1
+        segment_concept_data.append(concept_avgs)
+
+    df_concepts_corr = pd.DataFrame(segment_concept_data)
+    df_concepts_corr.set_index("segment", inplace=True)
     buf_heatmap = create_concept_correlation_heatmap(df_concepts_corr)
     if buf_heatmap:
         st.image(buf_heatmap, caption="Concept Correlation Heatmap")
@@ -944,15 +1036,10 @@ if st.session_state.analysis_results is not None:
 else:
     st.info("Please run an analysis to see the concept correlation heatmap.")
 
-###################################
-# Chart 2: Segment Duration Chart
-###################################
+# ---------------------------------------------------------------------------- #
+# 2) SEGMENT DURATION DISTRIBUTION
+# ---------------------------------------------------------------------------- #
 st.markdown("## 2. Segment Duration Distribution")
-st.markdown("""
-This bar chart shows each segment’s length, providing a quick overview of how the 
-video is split.
-""")
-
 def plot_segment_durations(num_segments, total_duration):
     durations = [(i+1, total_duration/num_segments) for i in range(num_segments)]
     segments = [f"Segment {d[0]}" for d in durations]
@@ -976,14 +1063,10 @@ if st.session_state.analysis_results is not None:
 else:
     st.info("Segment Duration Chart will appear once you run an analysis.")
 
-############################################
-# Chart 3: Weighted Probability Over Time
-############################################
+# ---------------------------------------------------------------------------- #
+# 3) WEIGHTED PROBABILITY OVER TIME
+# ---------------------------------------------------------------------------- #
 st.markdown("## 3. Weighted Probability Over Time")
-st.markdown("""
-Monitor how a selected concept's weighted probability evolves across segments.
-""")
-
 def plot_weighted_prob_over_time(segment_info, concept):
     x_vals = []
     y_vals = []
@@ -1018,7 +1101,10 @@ if st.session_state.analysis_results is not None:
             concept_list_sorted
         )
         if st.button("Plot Weighted Probability"):
-            fig_weighted_prob = plot_weighted_prob_over_time(st.session_state.analysis_results["segment_info"], selected_concept_for_weight_chart)
+            fig_weighted_prob = plot_weighted_prob_over_time(
+                st.session_state.analysis_results["segment_info"],
+                selected_concept_for_weight_chart
+            )
             buf_wprob = BytesIO()
             fig_weighted_prob.savefig(buf_wprob, format='png', bbox_inches='tight')
             plt.close(fig_weighted_prob)
@@ -1029,14 +1115,10 @@ if st.session_state.analysis_results is not None:
 else:
     st.info("Run analysis to enable Weighted Probability Over Time chart.")
 
-##########################################################
-# Chart 4: Per-Frame Concept Ranking for a Chosen Segment
-##########################################################
+# ---------------------------------------------------------------------------- #
+# 4) PER-FRAME CONCEPT RANKING (CHOSEN SEGMENT)
+# ---------------------------------------------------------------------------- #
 st.markdown("## 4. Per-Frame Concept Ranking (Chosen Segment)")
-st.markdown("""
-A stacked bar chart illustrating the concept distributions for each frame in the selected segment.
-""")
-
 def create_per_frame_concept_chart(segment_data):
     frame_dicts = []
     for i, frame_res in enumerate(segment_data["frame_analyses"]):
@@ -1050,7 +1132,7 @@ def create_per_frame_concept_chart(segment_data):
         all_concepts_in_segment.update(fd.keys())
 
     data_for_stack = []
-    for i, fd in enumerate(frame_dicts):
+    for fd in frame_dicts:
         row_data = []
         for c in all_concepts_in_segment:
             row_data.append(fd.get(c, 0.0))
@@ -1087,14 +1169,10 @@ if st.session_state.analysis_results is not None:
 else:
     st.info("Analyze a video first to enable this chart.")
 
-##############################################
-# Chart 5: Rolling Average of Similarities
-##############################################
+# ---------------------------------------------------------------------------- #
+# 5) ROLLING AVERAGE OF SIMILARITIES
+# ---------------------------------------------------------------------------- #
 st.markdown("## 5. Rolling Average of Similarities")
-st.markdown("""
-A rolling average helps smooth out noise when you have many segments.
-""")
-
 def plot_rolling_similarity(similarities, window=2):
     if len(similarities) > 1:
         sim_series = pd.Series(similarities)
@@ -1118,7 +1196,7 @@ def plot_rolling_similarity(similarities, window=2):
 if st.session_state.analysis_results is not None:
     similarities = st.session_state.analysis_results["similarities"]
     if len(similarities) < 2:
-        st.info("At least 2 segments are needed to compute rolling average.")
+        st.info("At least 2 segments are needed to compute a rolling average.")
     else:
         window_size = st.slider("Rolling Window Size:", 2, max(2, len(similarities)), 2)
         if st.button("Plot Rolling Similarity"):
