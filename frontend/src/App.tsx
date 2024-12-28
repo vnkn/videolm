@@ -39,7 +39,8 @@ function App() {
       }
       
       const data = await response.json();
-      setAnalysis(data.results);
+      // Backend returns data directly, not nested under 'results'
+      setAnalysis(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
