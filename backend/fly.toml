@@ -1,0 +1,38 @@
+[app]
+name = "videolm-backend-jdebauvg"
+primary_region = "lax"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+[deploy]
+  release_command = "poetry install"
+  strategy = "immediate"
+
+[processes]
+  app = "poetry run uvicorn app.main:app --host 0.0.0.0 --port 8080"

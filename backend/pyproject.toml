@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "videolm-backend"
+version = "0.1.0"
+description = "VideoLM Backend Service"
+authors = ["Devin"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = {extras = ["all"], version = "^0.115.6"}
+uvicorn = "^0.34.0"
+python-multipart = "^0.0.20"
+yt-dlp = "^2024.12.23"
+opencv-python-headless = "^4.10.0.84"
+numpy = "^2.2.1"
+pillow = "^11.0.0"
+python-dotenv = "^1.0.1"
+
+[tool.poetry.scripts]
+start = "uvicorn app.main:app --host 0.0.0.0 --port 8080"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
