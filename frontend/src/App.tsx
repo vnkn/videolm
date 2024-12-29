@@ -23,7 +23,7 @@ function App() {
     setError(null);
     
     try {
-      const response = await fetch('http://localhost:8000/analyze', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -39,8 +39,8 @@ function App() {
       }
       
       const data = await response.json();
-      // Backend returns data directly, not nested under 'results'
-      setAnalysis(data);
+      // Backend returns data nested under 'results'
+      setAnalysis(data.results);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
