@@ -250,13 +250,25 @@ def apply_extracted_concepts(text: str, threshold: float = 0.4):
 # ---------------------------------------------------------------------------- #
 def Download(url, output_path=None):
     ydl_opts = {
-        'format': 'best',
-        'outtmpl': '%(title)s.%(ext)s' if not output_path else output_path,
+        'format': 'bestvideo+bestaudio/best',  # Attempt to download the best quality video and audio.
+        'outtmpl': '%(title)s.%(ext)s' if not output_path else output_path,  # Output filename template.
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'geo_bypass': True,  # Bypass geographical restrictions.
+        'nocheckcertificate': True,  # Ignore SSL certificate errors.
+        'retries': 3,  # Retry the download up to 3 times if it fails.
+        'postprocessors': [{
+            'key': 'FFmpegVideoConvertor',
+            'preferedformat': 'mp4'  # Ensure the output format is compatible (e.g., mp4).
+        }],
+        'ignoreerrors': True,  # Skip problematic videos instead of stopping entirely.
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             return ydl.prepare_filename(info)
+    except yt_dlp.utils.DownloadError as e:
+        print(f"Download error: {str(e)}")
+        return None
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         return None
