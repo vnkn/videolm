@@ -250,17 +250,18 @@ def apply_extracted_concepts(text: str, threshold: float = 0.4):
 # ---------------------------------------------------------------------------- #
 def Download(url, output_path=None):
     ydl_opts = {
-        'format': 'bestvideo+bestaudio/best',  # Attempt to download the best quality video and audio.
-        'outtmpl': '%(title)s.%(ext)s' if not output_path else output_path,  # Output filename template.
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'geo_bypass': True,  # Bypass geographical restrictions.
-        'nocheckcertificate': True,  # Ignore SSL certificate errors.
-        'retries': 3,  # Retry the download up to 3 times if it fails.
+        'format': 'mp4/bestvideo+bestaudio',  # Prioritize MP4 format
+        'merge_output_format': 'mp4',  # Ensure merged output is MP4
+        'outtmpl': '%(title)s.%(ext)s' if not output_path else output_path,  # Specify output filename
         'postprocessors': [{
             'key': 'FFmpegVideoConvertor',
-            'preferedformat': 'mp4'  # Ensure the output format is compatible (e.g., mp4).
+            'preferedformat': 'mp4'
         }],
-        'ignoreerrors': True,  # Skip problematic videos instead of stopping entirely.
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'geo_bypass': True,  # Bypass geographical restrictions
+        'nocheckcertificate': True,  # Ignore SSL certificate errors
+        'retries': 5,  # Increase retry count
+        'ignoreerrors': True,  # Skip problematic videos
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
